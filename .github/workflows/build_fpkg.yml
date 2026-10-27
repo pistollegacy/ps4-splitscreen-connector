@@ -24,22 +24,8 @@ jobs:
       # -------------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
-#     with:
+        with:
           submodules: false
-
-      # -------------------------------------------------------------------------
-      # Cache OpenOrbis SDK
-      # -------------------------------------------------------------------------
-# - name: Cache OpenOrbis SDK (DISABLED)
-#     id: cache-sdk
-#   uses: actions/cache@v4
-#     with:
-#       path: |
-            ~/openorbis-sdk
-            ~/.cache/openorbis
-#         key: openorbis-sdk-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt') }}
-#         restore-keys: |
-            openorbis-sdk-${{ runner.os }}-
 
       # -------------------------------------------------------------------------
       # Install Dependencies
@@ -58,7 +44,6 @@ jobs:
       # Build OpenOrbis Toolchain
       # -------------------------------------------------------------------------
       - name: Build OpenOrbis Toolchain
-        if: true
         run: |
           cd ~
           git clone --recursive https://github.com/OpenOrbis/openorbis-sdk
@@ -170,9 +155,9 @@ jobs:
       # -------------------------------------------------------------------------
       - name: Upload FPKG Artifact
         uses: actions/upload-artifact@v4
-#     with:
+        with:
           name: PS4SplitScreenConnector-fpkg
-#       path: ${{ github.workspace }}/output/*.fpkg
+          path: ${{ github.workspace }}/output/*.fpkg
           retention-days: 30
 
       # -------------------------------------------------------------------------
@@ -181,7 +166,7 @@ jobs:
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
-#     with:
+        with:
           files: ${{ github.workspace }}/output/*.fpkg
           generate_release_notes: true
           tag_name: ${{ github.ref_name }}
