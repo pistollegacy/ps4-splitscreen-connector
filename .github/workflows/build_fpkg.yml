@@ -48,17 +48,27 @@ jobs:
       # -------------------------------------------------------------------------
       - name: Build OpenOrbis Toolchain
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENORBIS_PAT: ${{ secrets.OPENORBIS_PAT }}
         run: |
           cd ~
-          for i in {1..3}; do
-            echo "Attempt $i/3: Cloning OpenOrbis SDK..."
-            git clone --depth=1 --recurse-submodules --shallow-submodules https://${GITHUB_TOKEN}@github.com/OpenOrbis/openorbis-sdk && break
-            echo "Retry $i/3 failed, waiting 10s..."
-            sleep 10
-          done
+          # Try authenticated clone first (if PAT provided)
+          if [ -n "${OPENORBIS_PAT}" ]; then
+            echo "Using PAT for authenticated clone..."
+            for i in {1..3}; do
+              git clone --depth=1 --recurse-submodules --shallow-submodules https://${OPENORBIS_PAT}@github.com/OpenOrbis/openorbis-sdk && break
+              echo "Retry $i/3..."
+              sleep 10
+            done
+          else
+            echo "No PAT provided, trying public clone..."
+            for i in {1..3}; do
+              git clone --depth=1 --recurse-submodules --shallow-submodules https://github.com/OpenOrbis/openorbis-sdk && break
+              echo "Retry $i/3..."
+              sleep 10
+            done
+          fi
           if [ ! -d "openorbis-sdk" ]; then
-            echo "Failed to clone after 3 attempts"
+            echo "All clone attempts failed"
             exit 1
           fi
           cd openorbis-sdk
