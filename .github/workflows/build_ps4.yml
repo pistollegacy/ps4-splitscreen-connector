@@ -1,0 +1,166 @@
+name: Build PS4 .pkg
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build PS4 Package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      # -------------------------------------------------------------------------
+      # Checkout
+      # -------------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # -------------------------------------------------------------------------
+      # Cache OpenOrbis Toolchain (~2 GB, saves 30+ min on subsequent runs)
+      # -------------------------------------------------------------------------
+      - name: Cache OpenOrbis SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/openorbis-sdk
+            ~/.cache/openorbis
+          key: openorbis-sdk-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            openorbis-sdk-${{ runner.os }}-
+
+      # -------------------------------------------------------------------------
+      # Install Dependencies
+      # -------------------------------------------------------------------------
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build git \
+            python3 python3-pip python3-venv \
+            libssl-dev pkg-config wget curl unzip \
+            clang lld llvm libelf-dev \
+            xorriso  # For orbis-pub-gen
+
+      # -------------------------------------------------------------------------
+      # Build OpenOrbis Toolchain (only if not cached)
+      # -------------------------------------------------------------------------
+      - name: Build OpenOrbis Toolchain
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd ~
+          git clone --recursive https://github.com/OpenOrbis/openorbis-sdk
+          cd openorbis-sdk
+          ./build-toolchain.sh 2>&1 | tee build-toolchain.log
+        env:
+          MAKEFLAGS: "-j$(nproc)"
+
+      # -------------------------------------------------------------------------
+      # Source Environment
+      # -------------------------------------------------------------------------
+      - name: Setup PS4SDK Environment
+        run: |
+          source ~/openorbis-sdk/environment.sh
+          echo "PS4SDK=$PS4SDK" >> $GITHUB_ENV
+          echo "$PS4SDK/bin" >> $GITHUB_PATH
+          $CC --version
+
+      # -------------------------------------------------------------------------
+      # Build Project
+      # -------------------------------------------------------------------------
+      - name: Build PS4SplitScreenConnector
+        run: |
+          source ~/openorbis-sdk/environment.sh
+          cd ${{ github.workspace }}
+          ./scripts/build_ps4.sh Release
+
+      # -------------------------------------------------------------------------
+      # Generate package.conf with unique Content-ID
+      # -------------------------------------------------------------------------
+      - name: Prepare Package Config
+        run: |
+          cd ${{ github.workspace }}
+          cp scripts/package.conf.template package.conf
+          
+          # Generate unique Content-ID from repo + commit
+          SHORT_SHA=$(git rev-parse --short=8 HEAD)
+          CONTENT_ID="UP0001-PS4SPLITSCREEN_00-${SHORT_SHA}000000"
+          
+          sed -i "s|UP0000-PS4SPLITSCREEN_00-ABCDEF1234567890|${CONTENT_ID}|" package.conf
+          sed -i 's|"eboot.bin" = "build_ps4/bin/splitscreen_demo"|"eboot.bin" = "build_ps4/bin/splitscreen_demo"|' package.conf
+          
+          echo "Content-ID: ${CONTENT_ID}"
+          cat package.conf
+
+      # -------------------------------------------------------------------------
+      # Build .pkg using openorbis-pub-gen
+      # -------------------------------------------------------------------------
+      - name: Create PS4 Package (.pkg)
+        run: |
+          source ~/openorbis-sdk/environment.sh
+          cd ${{ github.workspace }}
+          
+          # Try openorbis-pub-gen (may need to build it first)
+          if command -v orbis-pub-gen &> /dev/null; then
+            orbis-pub-gen -config package.conf -output PS4SplitScreenConnector.pkg
+          else
+            echo "Building openorbis-pub-gen..."
+            cd ~
+            git clone https://github.com/OpenOrbis/orbis-pub-gen 2>/dev/null || true
+            cd orbis-pub-gen
+            mkdir -p build && cd build
+            cmake .. -DCMAKE_PREFIX_PATH=$PS4SDK
+            make -j$(nproc)
+            sudo make install
+            
+            cd ${{ github.workspace }}
+            orbis-pub-gen -config package.conf -output PS4SplitScreenConnector.pkg
+          fi
+
+      # -------------------------------------------------------------------------
+      # Verify .pkg
+      # -------------------------------------------------------------------------
+      - name: Verify Package
+        run: |
+          cd ${{ github.workspace }}
+          ls -la PS4SplitScreenConnector.pkg
+          file PS4SplitScreenConnector.pkg
+          
+          # Quick validation
+          if [ -f PS4SplitScreenConnector.pkg ]; then
+            echo "✅ Package created successfully!"
+            echo "Size: $(du -h PS4SplitScreenConnector.pkg | cut -f1)"
+          else
+            echo "❌ Package creation failed"
+            exit 1
+          fi
+
+      # -------------------------------------------------------------------------
+      # Upload Artifact
+      # -------------------------------------------------------------------------
+      - name: Upload .pkg Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS4SplitScreenConnector-pkg
+          path: ${{ github.workspace }}/PS4SplitScreenConnector.pkg
+          retention-days: 30
+
+      # -------------------------------------------------------------------------
+      # Create Release (on tag push)
+      # -------------------------------------------------------------------------
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ github.workspace }}/PS4SplitScreenConnector.pkg
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

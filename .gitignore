@@ -1,0 +1,39 @@
+# Build directories
+build*/
+install*/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.ninja
+
+# Compiled objects
+*.o
+*.obj
+*.elf
+*.self
+*.pkg
+*.bin
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+*.err
+
+# Package config (contains Content-ID)
+package.conf
+
+# Local config
+config.local.cmake

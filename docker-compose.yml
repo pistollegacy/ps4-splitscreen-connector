@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  ps4-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: pkg-builder
+      args:
+        # Generate unique Content-ID from git commit
+        CONTENT_ID: "UP0001-PS4SPLITSCREEN_00-${GIT_COMMIT:-ABCDEF1234567890}"
+    volumes:
+      - ps4-sdk-cache:/home/builder/openorbis-sdk
+      - ./output:/src/output  # Output directory for .pkg
+    environment:
+      - MAKEFLAGS=-j$(nproc)
+    # Keep container running after build to copy artifact
+    command: >
+      bash -c "
+        cp /src/PS4SplitScreenConnector.pkg /src/output/ 2>/dev/null || true
+        ls -la /src/output/
+      "
+
+volumes:
+  ps4-sdk-cache:  # Persists ~2 GB toolchain between builds
+    driver: local
+
+# Usage:
+#   docker-compose build
+#   docker-compose run --rm ps4-builder
+#   # .pkg will be in ./output/

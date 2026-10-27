@@ -1,0 +1,92 @@
+# =============================================================================
+# PS4SplitScreenConnector - Docker Build for FPKG
+# =============================================================================
+# Usage:
+#   docker build -t ps4-fpkg-builder --target fpkg-builder .
+#   docker run --rm -v ${PWD}/output:/output ps4-fpkg-builder
+# =============================================================================
+
+FROM ubuntu:22.04 AS builder-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake ninja-build git \
+    python3 python3-pip python3-venv \
+    libssl-dev pkg-config wget curl unzip \
+    clang lld llvm libelf-dev \
+    xorriso ca-certificates python3-cryptography \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash builder
+USER builder
+WORKDIR /home/builder
+
+# -----------------------------------------------------------------------------
+# Stage: Build OpenOrbis SDK
+# -----------------------------------------------------------------------------
+FROM builder-base AS sdk-builder
+
+RUN git clone --recursive https://github.com/OpenOrbis/openorbis-sdk ~/openorbis-sdk \
+    && cd ~/openorbis-sdk \
+    && ./build-toolchain.sh 2>&1 | tee build-toolchain.log
+
+RUN . ~/openorbis-sdk/environment.sh && $CC --version
+
+# -----------------------------------------------------------------------------
+# Stage: Build Project
+# -----------------------------------------------------------------------------
+FROM sdk-builder AS project-builder
+
+USER root
+COPY --chown=builder:builder . /src
+USER builder
+WORKDIR /src
+
+RUN . ~/openorbis-sdk/environment.sh \
+    && ./scripts/build_ps4.sh Release
+
+# -----------------------------------------------------------------------------
+# Stage: Build FPKG Tools
+# -----------------------------------------------------------------------------
+FROM project-builder AS fpkg-tools
+
+# Build orbis-pub-fpkg
+RUN . ~/openorbis-sdk/environment.sh \
+    && cd ~ \
+    && git clone https://github.com/OpenOrbis/orbis-pub-gen 2>/dev/null || true \
+    && cd orbis-pub-gen \
+    && mkdir -p build && cd build \
+    && cmake .. -DCMAKE_PREFIX_PATH=$PS4SDK \
+    && make -j$(nproc) \
+    && sudo make install
+
+# Also install fpkg (Python alternative)
+RUN pip3 install --user fpkg 2>/dev/null || true
+
+# -----------------------------------------------------------------------------
+# Stage: Create FPKG
+# -----------------------------------------------------------------------------
+FROM fpkg-tools AS fpkg-builder
+
+ARG CONTENT_ID=UP0001-PS4SPLITSCREEN_00-ABCDEF1234567890
+ARG PASSCODE=00000000000000000000000000000000
+
+RUN . ~/openorbis-sdk/environment.sh \
+    && cd /src \
+    && mkdir -p /output \
+    && cp scripts/fpkg.conf.template /output/fpkg.conf \
+    && sed -i "s|UP0001-PS4SPLITSCREEN_00-0000000000000000|${CONTENT_ID}|" /output/fpkg.conf \
+    && sed -i "s|Passcode = 00000000000000000000000000000000|Passcode = ${PASSCODE}|" /output/fpkg.conf \
+    && sed -i "s|\"eboot.bin\" = \"build_ps4/bin/splitscreen_demo\"|\"eboot.bin\" = \"build_ps4/bin/splitscreen_demo\"|" /output/fpkg.conf \
+    && cd /output \
+    && orbis-pub-fpkg -config fpkg.conf -output PS4SplitScreenConnector.fpkg
+
+RUN ls -la /output/PS4SplitScreenConnector.fpkg && file /output/PS4SplitScreenConnector.fpkg
+
+# -----------------------------------------------------------------------------
+# Export Stage
+# -----------------------------------------------------------------------------
+FROM scratch AS export
+COPY --from=fpkg-builder /output/PS4SplitScreenConnector.fpkg /PS4SplitScreenConnector.fpkg

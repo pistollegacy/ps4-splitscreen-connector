@@ -1,0 +1,108 @@
+# =============================================================================
+# PS4SplitScreenConnector - FPKG Package Configuration
+# =============================================================================
+# FPKG (Fake Package) for jailbroken PS4 (9.00 or lower)
+# Uses orbis-pub-fpkg or fpkg tools
+# =============================================================================
+
+# Package Identity (FPKG format)
+Content-ID = UP0001-PS4SPLITSCREEN_00-0000000000000000
+Passcode = 00000000000000000000000000000000  # 32 hex chars for FPKG
+
+# Metadata
+Title = PS4 SplitScreen Connector
+Title_ID = PS4SPLITSCREEN
+Category = gd
+Content_Type = gamedata
+Version = 01.00
+App_Version = 01.00
+Package_Version = 01.00
+SDK_Version = 09.008.000
+Target_App_Version = 01.00
+
+# Content Files
+Content = {
+    # Main executable (REQUIRED)
+    "eboot.bin" = "build_ps4/bin/splitscreen_demo"
+    
+    # Param.sfo (auto-generated from above)
+    # "sce_sys/param.sfo" = "auto"
+    
+    # App icon (512x512 PNG, REQUIRED for homebrew)
+    # "sce_sys/icon0.png" = "assets/icon0.png"
+    
+    # Live area (optional but recommended)
+    # "sce_sys/livearea/contents/startup.png" = "assets/startup.png"
+    # "sce_sys/livearea/contents/bg.png" = "assets/bg.png"
+    # "sce_sys/livearea/contents/icon.png" = "assets/livearea_icon.png"
+}
+
+# System Requirements
+System_Software = 09.00
+License_Type = Free
+
+# Entitlements (for network access on jailbroken PS4)
+Entitlements = {
+    "uac_network" = "true"
+    "uac_network_host" = "true"
+    "uac_network_client" = "true"
+    "uac_internet" = "true"
+    "uac_internet_host" = "true"
+    "uac_internet_client" = "true"
+    "np_commerce" = "true"
+    "np_commerce2" = "true"
+    "np_drm" = "true"
+    "np_social" = "true"
+}
+
+# Video/Audio
+Video_Out = {
+    "resolution" = "1920x1080"
+    "frame_rate" = "60"
+    "format" = "RGB888"
+}
+
+Audio_Out = {
+    "format" = "PCM"
+    "channels" = "2"
+    "sample_rate" = "48000"
+}
+
+# Memory
+Memory = {
+    "main" = "256MB"
+    "video" = "256MB"
+    "audio" = "8MB"
+}
+
+# Required System Modules
+System_Modules = [
+    "libScePad.sprx"
+    "libSceGnm.sprx"
+    "libSceVideoOut.sprx"
+    "libSceAudioOut.sprx"
+    "libSceUserService.sprx"
+    "libSceSysmodule.sprx"
+    "libSceNet.sprx"
+    "libSceNetCtl.sprx"
+    "libScePthread.sprx"
+]
+
+# Permissions
+Permissions = {
+    "allow_game_data_save" = "true"
+    "allow_screenshot" = "true"
+    "allow_video_capture" = "true"
+    "allow_broadcast" = "true"
+}
+
+# FPKG Specific
+FPKG = {
+    "enable" = "true"
+    "keystone" = "auto"
+}
+
+# Build command:
+# orbis-pub-fpkg -config fpkg.conf -output PS4SplitScreenConnector.fpkg
+# OR (using fpkg tool):
+# fpkg --package fpkg.conf --out PS4SplitScreenConnector.fpkg
