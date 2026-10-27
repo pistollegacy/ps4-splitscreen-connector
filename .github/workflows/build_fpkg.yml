@@ -45,6 +45,13 @@ jobs:
           cd ~
           SDK_DIR="openorbis-sdk"
           
+          # Debug: Check if secret is available
+          if [ -n "${OPENORBIS_PAT}" ]; then
+            echo "? OPENORBIS_PAT secret is set (length: ${#OPENORBIS_PAT})"
+          else
+            echo "? OPENORBIS_PAT secret is NOT set or empty"
+          fi
+          
           # Try pre-built release
           echo "Trying pre-built release..."
           if wget -q --spider "https://github.com/OpenOrbis/openorbis-sdk/releases/latest/download/openorbis-sdk-linux.tar.gz" 2>/dev/null; then
@@ -52,7 +59,7 @@ jobs:
             wget -q "https://github.com/OpenOrbis/openorbis-sdk/releases/latest/download/openorbis-sdk-linux.tar.gz" -O openorbis-sdk.tar.gz
             tar -xzf openorbis-sdk.tar.gz
             mv openorbis-sdk-* "$SDK_DIR" 2>/dev/null || mv openorbis-sdk "$SDK_DIR" 2>/dev/null
-            echo "✅ Pre-built SDK downloaded"
+            echo "? Pre-built SDK downloaded"
           else
             echo "No pre-built release, trying git clone..."
             
@@ -60,20 +67,20 @@ jobs:
               echo "Using PAT for authenticated clone..."
               for i in {1..3}; do
                 git clone --depth=1 --recurse-submodules --shallow-submodules https://${OPENORBIS_PAT}@github.com/OpenOrbis/openorbis-sdk "$SDK_DIR" && break
-                echo "Retry $i/3..."
+                echo "Retry $i/3 failed, waiting 10s..."
                 sleep 10
               done
             else
               echo "No PAT, trying public clone..."
               for i in {1..3}; do
                 git clone --depth=1 --recurse-submodules --shallow-submodules https://github.com/OpenOrbis/openorbis-sdk "$SDK_DIR" && break
-                echo "Retry $i/3..."
+                echo "Retry $i/3 failed, waiting 10s..."
                 sleep 10
               done
             fi
             
             if [ ! -d "$SDK_DIR" ]; then
-              echo "❌ All SDK acquisition methods failed"
+              echo "? All SDK acquisition methods failed"
               exit 1
             fi
             
@@ -83,9 +90,9 @@ jobs:
           
           if [ -f "$SDK_DIR/environment.sh" ]; then
             echo "SDK_PATH=$SDK_DIR" >> $GITHUB_OUTPUT
-            echo "✅ SDK ready at ~/$SDK_DIR"
+            echo "? SDK ready at ~/$SDK_DIR"
           else
-            echo "❌ SDK not found"
+            echo "? SDK not found"
             exit 1
           fi
         timeout-minutes: 60
