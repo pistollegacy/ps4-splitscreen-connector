@@ -1,0 +1,190 @@
+name: Build PS4 FPKG
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      content_id:
+        description: 'Custom Content-ID (optional)'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-fpkg:
+    name: Build FPKG for Jailbroken PS4
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+
+    steps:
+      # -------------------------------------------------------------------------
+      # Checkout
+      # -------------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      # -------------------------------------------------------------------------
+      # Install Dependencies
+      # -------------------------------------------------------------------------
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build git \
+            python3 python3-pip python3-venv \
+            libssl-dev pkg-config wget curl unzip \
+            clang lld llvm libelf-dev \
+            xorriso python3-cryptography
+
+      # -------------------------------------------------------------------------
+      # Build OpenOrbis Toolchain
+      # -------------------------------------------------------------------------
+      - name: Build OpenOrbis Toolchain
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd ~
+          for i in {1..3}; do
+            echo "Attempt $i/3: Cloning OpenOrbis SDK..."
+            git clone --depth=1 --recurse-submodules --shallow-submodules https://${GITHUB_TOKEN}@github.com/OpenOrbis/openorbis-sdk && break
+            echo "Retry $i/3 failed, waiting 10s..."
+            sleep 10
+          done
+          if [ ! -d "openorbis-sdk" ]; then
+            echo "Failed to clone after 3 attempts"
+            exit 1
+          fi
+          cd openorbis-sdk
+          ./build-toolchain.sh 2>&1 | tee build-toolchain.log
+        timeout-minutes: 60
+
+      # -------------------------------------------------------------------------
+      # Setup Environment
+      # -------------------------------------------------------------------------
+      - name: Setup PS4SDK Environment
+        run: |
+          source ~/openorbis-sdk/environment.sh
+          echo "PS4SDK=$PS4SDK" >> $GITHUB_ENV
+          echo "$PS4SDK/bin" >> $GITHUB_PATH
+          $CC --version
+
+      # -------------------------------------------------------------------------
+      # Build Project
+      # -------------------------------------------------------------------------
+      - name: Build PS4SplitScreenConnector
+        run: |
+          source ~/openorbis-sdk/environment.sh
+          cd ${{ github.workspace }}
+          ./scripts/build_ps4.sh Release
+        timeout-minutes: 30
+
+      # -------------------------------------------------------------------------
+      # Build FPKG Tools
+      # -------------------------------------------------------------------------
+      - name: Build orbis-pub-fpkg
+        run: |
+          source ~/openorbis-sdk/environment.sh
+          cd ~
+          for i in {1..3}; do
+            git clone https://${GITHUB_TOKEN}@github.com/OpenOrbis/orbis-pub-gen 2>/dev/null && break
+            echo "Retry $i/3..."
+            sleep 10
+          done
+          cd orbis-pub-gen
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH=$PS4SDK
+          make -j$(nproc)
+          sudo make install
+        timeout-minutes: 30
+
+      # -------------------------------------------------------------------------
+      # Generate FPKG Config
+      # -------------------------------------------------------------------------
+      - name: Generate FPKG Config
+        id: fpkg-config
+        run: |
+          cd ${{ github.workspace }}
+          mkdir -p output
+          
+          SHORT_SHA=$(git rev-parse --short=8 HEAD)
+          CONTENT_ID="${{ github.event.inputs.content_id }}"
+          if [ -z "$CONTENT_ID" ]; then
+            CONTENT_ID="UP0001-PS4SPLITSCREEN_00-${SHORT_SHA}000000"
+          fi
+          PASSCODE="00000000000000000000000000000000"
+          
+          cp scripts/fpkg.conf.template output/fpkg.conf
+          sed -i "s|UP0001-PS4SPLITSCREEN_00-0000000000000000|${CONTENT_ID}|" output/fpkg.conf
+          sed -i "s|Passcode = 00000000000000000000000000000000|Passcode = ${PASSCODE}|" output/fpkg.conf
+          sed -i "s|\"eboot.bin\" = \"build_ps4/bin/splitscreen_demo\"|\"eboot.bin\" = \"build_ps4/bin/splitscreen_demo\"|" output/fpkg.conf
+          
+          echo "content_id=${CONTENT_ID}" >> $GITHUB_OUTPUT
+          echo "FPKG config generated with Content-ID: ${CONTENT_ID}"
+
+      # -------------------------------------------------------------------------
+      # Create FPKG
+      # -------------------------------------------------------------------------
+      - name: Create FPKG
+        run: |
+          source ~/openorbis-sdk/environment.sh
+          cd ${{ github.workspace }}/output
+          
+          FPKG_NAME="PS4SplitScreenConnector_${{ steps.fpkg-config.outputs.content_id }}.fpkg"
+          
+          orbis-pub-fpkg -config fpkg.conf -output "${FPKG_NAME}"
+          
+          echo "fpkg_name=${FPKG_NAME}" >> $GITHUB_OUTPUT
+          echo "fpkg_path=${{ github.workspace }}/output/${FPKG_NAME}" >> $GITHUB_OUTPUT
+        timeout-minutes: 10
+
+      # -------------------------------------------------------------------------
+      # Verify FPKG
+      # -------------------------------------------------------------------------
+      - name: Verify FPKG
+        run: |
+          cd ${{ github.workspace }}/output
+          FPKG_NAME="${{ steps.create-fpkg.outputs.fpkg_name }}"
+          
+          if [ -f "${FPKG_NAME}" ]; then
+            SIZE=$(du -h "${FPKG_NAME}" | cut -f1)
+            echo "✅ FPKG created successfully!"
+            echo "File: ${FPKG_NAME}"
+            echo "Size: ${SIZE}"
+            echo "Content-ID: ${{ steps.fpkg-config.outputs.content_id }}"
+          else
+            echo "❌ FPKG not found!"
+            ls -la
+            exit 1
+          fi
+        timeout-minutes: 5
+
+      # -------------------------------------------------------------------------
+      # Upload Artifact
+      # -------------------------------------------------------------------------
+      - name: Upload FPKG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS4SplitScreenConnector-fpkg
+          path: ${{ github.workspace }}/output/*.fpkg
+          retention-days: 30
+
+      # -------------------------------------------------------------------------
+      # Create Release (on tag push)
+      # -------------------------------------------------------------------------
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ github.workspace }}/output/*.fpkg
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+          name: FPKG Release ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
